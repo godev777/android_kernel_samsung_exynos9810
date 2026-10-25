@@ -41,6 +41,9 @@ jobs:
           echo "CFLAGS_susfs.o += -Wno-error -Wno-missing-braces" >> fs/Makefile
           sed -i 's/ = {0};/ = {{0}};/g' fs/susfs.c || true
 
+          # Fix ZSTD_FALLTHROUGH macro syntax for Clang
+          sed -i 's/#define ZSTD_FALLTHROUGH .*/#define ZSTD_FALLTHROUGH do {} while (0)/' lib/zstd/common/compiler.h || true
+
           export ARCH=arm64
           export SUBARCH=arm64
           export CROSS_COMPILE=aarch64-linux-android-
