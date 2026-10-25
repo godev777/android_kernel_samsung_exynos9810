@@ -1,4 +1,4 @@
- name: Build Kernel Note 9 (Lineage 24 + KernelSU-Next)
+name: Build Kernel Note 9
 
     on:
       workflow_dispatch:
@@ -48,17 +48,9 @@
               make O=out universal9810_Q_defconfig
               make -j$(nproc --all) O=out
 
-          - name: Package boot.img via Magiskboot
+          - name: Package Artifacts
             run: |
               mkdir -p artifact
-              curl -sLo magiskboot.tar.xz https://github.com/topjohnwu/Magisk/releases/download/v28.1/Magisk-v28.1.apk
-              unzip -q magiskboot.tar.xz "lib/x86_64/libmagiskboot.so" -d magisk_tmp
-              mv magisk_tmp/lib/x86_64/libmagiskboot.so ./magiskboot
-              chmod +x ./magiskboot
-
-              # Unduh boot.img stock Lineage 24 untuk diambil ramdisk-nya
-              curl -sLo base_boot.img https://images.krazey.de/crownlte/boot.img || cp out/arch/arm64/boot/Image ./artifact/Image
-
               cp out/arch/arm64/boot/Image ./artifact/Image-exynos9810
               cp out/arch/arm64/boot/dts/exynos/exynos9810.dtb ./artifact/dtb.img || true
 
