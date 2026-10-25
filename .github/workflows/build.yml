@@ -17,9 +17,13 @@ jobs:
 
       - name: Setup Build Environment
         run: |
+          sudo add-apt-repository universe -y || true
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential ccache curl flex \
-            libssl-dev libelf-dev libncurses5-dev python3 git cpio libtinfo5
+            git libssl-dev libelf-dev libncurses5-dev python3 libtinfo5 \
+            cpio lz4 zstd dwarves || sudo apt-get install -y bc bison \
+            build-essential ccache curl flex git libssl-dev libelf-dev \
+            libncurses-dev python3 cpio lz4 zstd
 
       - name: Download Clang & GCC Toolchain
         run: |
@@ -31,8 +35,19 @@ jobs:
 
       - name: Build Kernel Image
         run: |
-          CLANG_BIN=$(find $(pwd)/toolchain/clang -name "bin" -type d | grep clang- | head -n 1)
-          export PATH=$CLANG_BIN:$(pwd)/toolchain/gcc64/bin:$(pwd)/toolchain/gcc32/bin:$PATH
+          CLANG_DIR=$(find $(pwd)/toolchain/clang -name "clang-r365631c" -type d | head -n 1)
+          if [ -z "$CLANG_DIR" ]; then
+            CLANG_DIR=$(find $(pwd)/toolchain/clang -name "clang-r*" -type d | head -n 1)
+          fi
+          export PATH=$CLANG_DIR/bin:$(pwd)/toolchain/gcc64/bin:$(pwd)/toolchain/gcc32/bin:$PATH
+
+          echo "=== Compiler Verification ==="
+          which clang
+          clang --version
+          which aarch64-linux-android-gcc
+          aarch64-linux-android-gcc --version
+          echo "============================="
+
           export ARCH=arm64
           export SUBARCH=arm64
           export CROSS_COMPILE=aarch64-linux-android-
@@ -40,14 +55,18 @@ jobs:
           export CLANG_TRIPLE=aarch64-linux-gnu-
           export CC=clang
 
-          make O=out exynos9810-crownlte_defconfig
-          make -j$(nproc --all) O=out
+          make -j$(nproc --all) O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-android- CROSS_COMPILE_ARM32=arm-linux-androideabi- exynos9810-crownlte_defconfig
+          make -j$(nproc --all) O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-android- CROSS_COMPILE_ARM32=arm-linux-androideabi- Image.samsung dt.img Image
 
       - name: Package Artifacts
         run: |
           mkdir -p artifact
-          cp out/arch/arm64/boot/Image ./artifact/Image-exynos9810
-          find out/arch/arm64/boot/dts/exynos/ -name "*.dtb" -exec cp {} ./artifact/ \; || true
+          [ -f out/arch/arm64/boot/Image ] && cp out/arch/arm64/boot/Image ./artifact/Image-exynos9810
+          [ -f out/arch/arm64/boot/dt.img ] && cp out/arch/arm64/boot/dt.img ./artifact/dt.img
+          [ -f out/arch/arm64/boot/Image.samsung ] && cp out/arch/arm64/boot/Image.samsung ./artifact/Image.samsung
+          find out/arch/arm64/boot/dts/ -name "*.dtb" -exec cp {} ./artifact/ \; 2>/dev/null || true
+          echo "=== Output Artifacts ==="
+          ls -lh ./artifact/
 
       - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
