@@ -31,7 +31,8 @@ jobs:
 
       - name: Build Kernel Image
         run: |
-          export PATH=$(pwd)/toolchain/clang/clang-r383902/bin:$(pwd)/toolchain/gcc64/bin:$(pwd)/toolchain/gcc32/bin:$PATH
+          CLANG_BIN=$(find $(pwd)/toolchain/clang -name "bin" -type d | grep clang- | head -n 1)
+          export PATH=$CLANG_BIN:$(pwd)/toolchain/gcc64/bin:$(pwd)/toolchain/gcc32/bin:$PATH
           export ARCH=arm64
           export SUBARCH=arm64
           export CROSS_COMPILE=aarch64-linux-android-
@@ -39,7 +40,7 @@ jobs:
           export CLANG_TRIPLE=aarch64-linux-gnu-
           export CC=clang
 
-          make O=out universal9810_Q_defconfig
+          make O=out exynos9810-crownlte_defconfig
           make -j$(nproc --all) O=out
 
       - name: Package Artifacts
