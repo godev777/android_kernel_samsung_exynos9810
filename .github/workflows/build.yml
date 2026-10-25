@@ -1,61 +1,61 @@
 name: Build Kernel Note 9
 
-    on:
-      workflow_dispatch:
+on:
+  workflow_dispatch:
 
-    jobs:
-      build:
-        name: Compile Exynos 9810 Kernel
-        runs-on: ubuntu-22.04
-        steps:
-          - name: Checkout Kernel Source
-            uses: actions/checkout@v4
-            with:
-              ref: lineage-24.0-xxksu3-susfs2
-              submodules: recursive
-              fetch-depth: 1
+jobs:
+  build:
+    name: Compile Exynos 9810 Kernel
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout Kernel Source
+        uses: actions/checkout@v4
+        with:
+          ref: lineage-24.0-xxksu3-susfs2
+          submodules: recursive
+          fetch-depth: 1
 
-          - name: Setup Build Environment
-            run: |
-              sudo apt-get update
-              sudo apt-get install -y bc bison build-essential ccache curl flex \
-                libssl-dev libelf-dev libncurses5-dev python3 git cpio libtinfo5
+      - name: Setup Build Environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential ccache curl flex \
+            libssl-dev libelf-dev libncurses5-dev python3 git cpio libtinfo5
 
-          - name: Download Clang & GCC Toolchain
-            run: |
-              mkdir -p toolchain
-              cd toolchain
-              git clone --depth=1 https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 -b android11-release clang
-              git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 -b android11-release gcc64
-              git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 -b android11-release gcc32
+      - name: Download Clang & GCC Toolchain
+        run: |
+          mkdir -p toolchain
+          cd toolchain
+          git clone --depth=1 https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 -b android11-release clang
+          git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 -b android11-release gcc64
+          git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 -b android11-release gcc32
 
-          - name: Switch Submodule to KernelSU-Next
-            run: |
-              git submodule deinit -f KernelSU || true
-              rm -rf drivers/kernelsu KernelSU
-              git clone --depth=1 https://github.com/KernelSU-Next/KernelSU-Next.git -b next drivers/kernelsu
+      - name: Switch Submodule to KernelSU-Next
+        run: |
+          git submodule deinit -f KernelSU || true
+          rm -rf drivers/kernelsu KernelSU
+          git clone --depth=1 https://github.com/KernelSU-Next/KernelSU-Next.git -b next drivers/kernelsu
 
-          - name: Build Kernel Image
-            run: |
-              export PATH=$(pwd)/toolchain/clang/clang-r383902/bin:$(pwd)/toolchain/gcc64/bin:$(pwd)/toolchain/gcc32/bin:$PATH
-              export ARCH=arm64
-              export SUBARCH=arm64
-              export CROSS_COMPILE=aarch64-linux-android-
-              export CROSS_COMPILE_ARM32=arm-linux-androideabi-
-              export CLANG_TRIPLE=aarch64-linux-gnu-
-              export CC=clang
+      - name: Build Kernel Image
+        run: |
+          export PATH=$(pwd)/toolchain/clang/clang-r383902/bin:$(pwd)/toolchain/gcc64/bin:$(pwd)/toolchain/gcc32/bin:$PATH
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-android-
+          export CROSS_COMPILE_ARM32=arm-linux-androideabi-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          export CC=clang
 
-              make O=out universal9810_Q_defconfig
-              make -j$(nproc --all) O=out
+          make O=out universal9810_Q_defconfig
+          make -j$(nproc --all) O=out
 
-          - name: Package Artifacts
-            run: |
-              mkdir -p artifact
-              cp out/arch/arm64/boot/Image ./artifact/Image-exynos9810
-              cp out/arch/arm64/boot/dts/exynos/exynos9810.dtb ./artifact/dtb.img || true
+      - name: Package Artifacts
+        run: |
+          mkdir -p artifact
+          cp out/arch/arm64/boot/Image ./artifact/Image-exynos9810
+          cp out/arch/arm64/boot/dts/exynos/exynos9810.dtb ./artifact/dtb.img || true
 
-          - name: Upload Kernel Artifact
-            uses: actions/upload-artifact@v4
-            with:
-              name: Crownlte-KernelSU-Next-Kernel
-              path: artifact/
+      - name: Upload Kernel Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Crownlte-KernelSU-Next-Kernel
+          path: artifact/
