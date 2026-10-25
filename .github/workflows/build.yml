@@ -35,18 +35,7 @@ jobs:
 
       - name: Build Kernel Image
         run: |
-          CLANG_DIR=$(find $(pwd)/toolchain/clang -name "clang-r365631c" -type d | head -n 1)
-          if [ -z "$CLANG_DIR" ]; then
-            CLANG_DIR=$(find $(pwd)/toolchain/clang -name "clang-r*" -type d | head -n 1)
-          fi
-          export PATH=$CLANG_DIR/bin:$(pwd)/toolchain/gcc64/bin:$(pwd)/toolchain/gcc32/bin:$PATH
-
-          echo "=== Compiler Verification ==="
-          which clang
-          clang --version
-          which aarch64-linux-android-gcc
-          aarch64-linux-android-gcc --version
-          echo "============================="
+          export PATH=$(pwd)/toolchain/clang/clang-r365631c/bin:$(pwd)/toolchain/gcc64/bin:$(pwd)/toolchain/gcc32/bin:$PATH
 
           export ARCH=arm64
           export SUBARCH=arm64
@@ -55,7 +44,7 @@ jobs:
           export CLANG_TRIPLE=aarch64-linux-gnu-
           export CC=clang
 
-          make -j$(nproc --all) O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-android- CROSS_COMPILE_ARM32=arm-linux-androideabi- exynos9810-crownlte_defconfig
+          make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-android- CROSS_COMPILE_ARM32=arm-linux-androideabi- exynos9810-crownlte_defconfig
           make -j$(nproc --all) O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-android- CROSS_COMPILE_ARM32=arm-linux-androideabi- Image.samsung dt.img Image
 
       - name: Package Artifacts
