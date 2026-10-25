@@ -29,12 +29,6 @@ jobs:
           git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 -b android11-release gcc64
           git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 -b android11-release gcc32
 
-      - name: Switch Submodule to KernelSU-Next
-        run: |
-          git submodule deinit -f KernelSU || true
-          rm -rf drivers/kernelsu KernelSU
-          git clone --depth=1 https://github.com/KernelSU-Next/KernelSU-Next.git -b next drivers/kernelsu
-
       - name: Build Kernel Image
         run: |
           export PATH=$(pwd)/toolchain/clang/clang-r383902/bin:$(pwd)/toolchain/gcc64/bin:$(pwd)/toolchain/gcc32/bin:$PATH
@@ -52,10 +46,10 @@ jobs:
         run: |
           mkdir -p artifact
           cp out/arch/arm64/boot/Image ./artifact/Image-exynos9810
-          cp out/arch/arm64/boot/dts/exynos/exynos9810.dtb ./artifact/dtb.img || true
+          find out/arch/arm64/boot/dts/exynos/ -name "*.dtb" -exec cp {} ./artifact/ \; || true
 
       - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Crownlte-KernelSU-Next-Kernel
+          name: Crownlte-KernelSU-Kernel
           path: artifact/
