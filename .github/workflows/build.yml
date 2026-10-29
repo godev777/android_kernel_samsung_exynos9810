@@ -1,11 +1,21 @@
-name: Build Kernel Note 9
+name: Build NullPoint Kernel
 
 on:
   workflow_dispatch:
+    inputs:
+      device:
+        description: 'Pilih Target Device'
+        required: true
+        default: 'crownlte'
+        type: choice
+        options:
+          - crownlte
+          - star2lte
+          - starlte
 
 jobs:
   build:
-    name: Compile Exynos 9810 Kernel
+    name: Compile NullPoint Kernel
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout Kernel Source
@@ -33,15 +43,13 @@ jobs:
           git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 -b android11-release gcc64
           git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 -b android11-release gcc32
 
-      - name: Build Kernel Image
+      - name: Configure & Build NullPoint Kernel
         run: |
           export PATH=$(pwd)/toolchain/clang/clang-r365631c/bin:$(pwd)/toolchain/gcc64/bin:$(pwd)/toolchain/gcc32/bin:$PATH
 
-          # Bypass Clang warning on susfs.c
+          # Patch Clang warnings & compatibility
           echo "CFLAGS_susfs.o += -Wno-error -Wno-missing-braces" >> fs/Makefile
           sed -i 's/ = {0};/ = {{0}};/g' fs/susfs.c || true
-
-          # Fix ZSTD_FALLTHROUGH macro syntax for Clang
           sed -i 's/#define ZSTD_FALLTHROUGH .*/#define ZSTD_FALLTHROUGH do {} while (0)/' lib/zstd/common/compiler.h || true
 
           export ARCH=arm64
@@ -52,21 +60,42 @@ jobs:
           export CC=clang
           export KCFLAGS="-Wno-error -Wno-missing-braces"
 
-          make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-android- CROSS_COMPILE_ARM32=arm-linux-androideabi- exynos9810-crownlte_defconfig
+          DEVICE="${{ github.event.inputs.device }}"
+          echo "Compiling for: $DEVICE"
+
+          # 1. Generate base defconfig
+          make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-android- CROSS_COMPILE_ARM32=arm-linux-androideabi- exynos9810-${DEVICE}_defconfig
+
+          # 2. Inject NullPoint Branding & Features
+          ./scripts/config --file out/.config --set-str LOCALVERSION "-NullPoint-v1.0-godev777"
+          ./scripts/config --file out/.config --enable TCP_CONG_BBR
+          ./scripts/config --file out/.config --set-str DEFAULT_TCP_CONG "bbr"
+          ./scripts/config --file out/.config --enable NETFILTER_XT_TARGET_HL
+          ./scripts/config --file out/.config --enable IP_NF_TARGET_TTL
+          ./scripts/config --file out/.config --enable IP6_NF_TARGET_HL
+          ./scripts/config --file out/.config --enable CRYPTO_ZSTD
+          ./scripts/config --file out/.config --enable ZRAM_DEF_COMP_ZSTD
+
+          # 3. Regenerate final config
+          make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-android- CROSS_COMPILE_ARM32=arm-linux-androideabi- olddefconfig
+
+          # 4. Compile Kernel Image
           make -j$(nproc --all) O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-android- CROSS_COMPILE_ARM32=arm-linux-androideabi- KCFLAGS="-Wno-error -Wno-missing-braces" Image.samsung
 
       - name: Package Artifacts
         run: |
           mkdir -p artifact
+          DEVICE="${{ github.event.inputs.device }}"
           [ -f out/arch/arm64/boot/Image ] && cp out/arch/arm64/boot/Image ./artifact/Image-exynos9810
           [ -f out/arch/arm64/boot/dt.img ] && cp out/arch/arm64/boot/dt.img ./artifact/dt.img
           [ -f out/arch/arm64/boot/Image.samsung ] && cp out/arch/arm64/boot/Image.samsung ./artifact/Image.samsung
           find out/arch/arm64/boot/dts/ -name "*.dtb" -exec cp {} ./artifact/ \; 2>/dev/null || true
-          echo "=== Output Artifacts ==="
+          
+          echo "=== Output Artifacts for $DEVICE ==="
           ls -lh ./artifact/
 
       - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Crownlte-KernelSU-Kernel
+          name: NullPoint-Kernel-${{ github.event.inputs.device }}-v1.0
           path: artifact/
