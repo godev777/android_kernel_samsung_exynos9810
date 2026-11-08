@@ -59,8 +59,8 @@ jobs:
           sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.l || true
           sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.lex.c_shipped || true
 
-          # Patch KernelSU-Next: UAPI 5, Auto-Crown com.rifsxd.ksunext, FBE bypass
-          sed -i 's/#define KERNEL_SU_UAPI_VERSION 6/#define KERNEL_SU_UAPI_VERSION 5/' KernelSU-Next/uapi/supercall.h || true
+          # Patch KernelSU-Next: UAPI 6 (native default), version 33355 (v3.4.2), Auto-Crown com.rifsxd.ksunext, FBE bypass
+          sed -i 's/expr 30000 + $(KSU_GIT_VERSION) + 289/echo 33355/' KernelSU-Next/kernel/Kbuild || true
           sed -i 's/return check_v2_signature/if (path \&\& strstr(path, "com.rifsxd.ksunext")) return true; return check_v2_signature/' KernelSU-Next/kernel/manager/apk_sign.c || true
           sed -i 's/file->f_inode->i_sb->s_magic != data_app_magic/0/' KernelSU-Next/kernel/manager/throne_tracker.c || true
 
