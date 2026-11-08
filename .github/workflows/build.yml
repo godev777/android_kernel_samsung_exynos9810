@@ -19,129 +19,104 @@ jobs:
           submodules: recursive
           fetch-depth: 1
 
-      - name: Install Build Dependencies & Toolchains
+      - name: Install Build Dependencies
         run: |
+          sudo add-apt-repository universe -y || true
           sudo apt-get update
-          sudo apt-get install -y build-essential bc bison flex libssl-dev libelf-dev \
-            git curl wget zip python3 python-is-python3 cpio lz4 zstd tar libarchive-tools \
-            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi \
-            dwarves
+          sudo apt-get install -y bc bison build-essential ccache curl flex \
+            git libssl-dev libelf-dev libncurses5-dev python3 libtinfo5 \
+            cpio lz4 zstd dwarves || sudo apt-get install -y bc bison \
+            build-essential ccache curl flex git libssl-dev libelf-dev \
+            libncurses-dev python3 cpio lz4 zstd
 
-      - name: Download Proton Clang Toolchain
+      - name: Download Official Google AOSP Clang & GCC Toolchains
         run: |
           mkdir -p toolchain
           cd toolchain
-          echo "Cloning Proton Clang from GitHub..."
-          git clone --depth=1 https://github.com/kdrag0n/proton-clang.git clang
+          echo "Cloning official Google Android 11 Clang..."
+          git clone --depth=1 https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 -b android11-release clang
+          echo "Cloning official Google GCC AArch64..."
+          git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 -b android11-release gcc64
+          echo "Cloning official Google GCC ARM32..."
+          git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 -b android11-release gcc32
           cd ..
 
       - name: Setup KernelSU-Next Legacy Driver
         run: |
-          echo "Removing legacy KernelSU..."
+          echo "Removing old KernelSU..."
           rm -rf KernelSU drivers/kernelsu
           echo "Installing KernelSU-Next legacy driver for Linux 4.9..."
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s legacy
 
-      - name: Patch Defconfig, Headers & Neutralize Stack Protector
+      - name: Configure & Patch Kernel
         run: |
-          echo "Disabling stack protector and BTF in all defconfigs..."
-          sed -i 's/CONFIG_CC_STACKPROTECTOR_STRONG=y/CONFIG_CC_STACKPROTECTOR_NONE=y/g' arch/arm64/configs/*defconfig || true
-          sed -i 's/CONFIG_CC_STACKPROTECTOR_REGULAR=y/CONFIG_CC_STACKPROTECTOR_NONE=y/g' arch/arm64/configs/*defconfig || true
-          sed -i 's/CONFIG_DEBUG_INFO_BTF=y/# CONFIG_DEBUG_INFO_BTF is not set/g' arch/arm64/configs/*defconfig || true
+          # Patch Clang warnings & compatibility
+          echo "CFLAGS_susfs.o += -Wno-error -Wno-missing-braces" >> fs/Makefile
+          sed -i 's/ = {0};/ = {{0}};/g' fs/susfs.c || true
+          sed -i 's/#define ZSTD_FALLTHROUGH .*/#define ZSTD_FALLTHROUGH do {} while (0)/' lib/zstd/common/compiler.h || true
 
-          echo "Disabling standalone -Werror and prepare-compiler-check in Makefile..."
-          sed -i 's/[[:space:]]-Werror[[:space:]]/ /g' Makefile arch/arm64/Makefile || true
-          sed -i 's/[[:space:]]-Werror$/ /g' Makefile arch/arm64/Makefile || true
-          sed -i 's/prepare: prepare-compiler-check/prepare:/g' Makefile || true
-          sed -i 's/prepare-compiler-check//g' Makefile || true
-          sed -i 's/Cannot use CONFIG_CC_STACKPROTECTOR_STRONG.*/# bypassed/g' Makefile || true
-
-          echo "Patching compiler-gcc.h version check & error attribute..."
-          sed -i 's/# error Sorry, your version of GCC is too old/\/\/# error/' include/linux/compiler-gcc.h || true
-          sed -i 's/#error Sorry, your version of GCC is too old/\/\/#error/' include/linux/compiler-gcc.h || true
-          sed -i 's/__attribute__((error(message)))//g' include/linux/compiler-gcc.h || true
-          sed -i 's/__attribute__((warning(message)))//g' include/linux/compiler-gcc.h || true
-
-          echo "Patching DTC yylloc for modern GCC host..."
+          # Patch DTC yylloc for modern host GCC
           sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.l || true
           sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.lex.c_shipped || true
 
-      - name: Compile Kernel Image & DTB
+          export PATH=$(pwd)/toolchain/clang/clang-r365631c/bin:$(pwd)/toolchain/gcc64/bin:$(pwd)/toolchain/gcc32/bin:$PATH
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-android-
+          export CROSS_COMPILE_ARM32=arm-linux-androideabi-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          export CC=clang
+          export KCFLAGS="-Wno-error -Wno-missing-braces"
+
+          # 1. Defconfig for crownlte
+          make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-android- CROSS_COMPILE_ARM32=arm-linux-androideabi- exynos9810-crownlte_defconfig
+
+          # 2. Inject NullPoint v2.5 Branding & Features
+          ./scripts/config --file out/.config --set-str LOCALVERSION "-NullPoint-v2.5-KSU-Next-godev777"
+          ./scripts/config --file out/.config --enable KSU
+          ./scripts/config --file out/.config --enable KSU_SUSFS
+          ./scripts/config --file out/.config --enable TCP_CONG_BBR
+          ./scripts/config --file out/.config --set-str DEFAULT_TCP_CONG "bbr"
+          ./scripts/config --file out/.config --enable NETFILTER_XT_TARGET_HL
+          ./scripts/config --file out/.config --enable IP_NF_TARGET_TTL
+          ./scripts/config --file out/.config --enable IP6_NF_TARGET_HL
+          ./scripts/config --file out/.config --enable CRYPTO_ZSTD
+          ./scripts/config --file out/.config --enable ZRAM_DEF_COMP_ZSTD
+          ./scripts/config --file out/.config --enable EROFS_FS
+
+          # 3. Finalize config
+          make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-android- CROSS_COMPILE_ARM32=arm-linux-androideabi- olddefconfig
+
+      - name: Compile Kernel Image & DT.img
         run: |
-          export PATH="$(pwd)/toolchain/clang/bin:$PATH"
-          export HOSTCFLAGS="-fcommon"
-          export KCFLAGS="-Wno-error -Wno-unknown-attributes -Wno-error=unknown-attributes -Wno-format"
+          export PATH=$(pwd)/toolchain/clang/clang-r365631c/bin:$(pwd)/toolchain/gcc64/bin:$(pwd)/toolchain/gcc32/bin:$PATH
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-android-
+          export CROSS_COMPILE_ARM32=arm-linux-androideabi-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          export CC=clang
 
-          # Defconfig for crownlte with Clang passed directly
-          make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- exynos9810-crownlte_defconfig
+          echo "Compiling Image.samsung..."
+          make -j$(nproc --all) O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-android- CROSS_COMPILE_ARM32=arm-linux-androideabi- KCFLAGS="-Wno-error -Wno-missing-braces" Image.samsung
 
-          # Ensure Stack Protector & BTF is disabled and KernelSU, SuSFS, BBR, and optimization configs are enabled
-          ./scripts/config --file out/.config \
-            -d CONFIG_CC_STACKPROTECTOR_STRONG \
-            -d CONFIG_CC_STACKPROTECTOR_REGULAR \
-            -e CONFIG_CC_STACKPROTECTOR_NONE \
-            -d CONFIG_DEBUG_INFO_BTF \
-            -e CONFIG_KSU \
-            -e CONFIG_KSU_SUSFS \
-            -e CONFIG_TCP_CONG_BBR \
-            -d CONFIG_DEFAULT_BIC \
-            -e CONFIG_DEFAULT_BBR \
-            -e CONFIG_NETFILTER_XT_TARGET_HL \
-            -e CONFIG_IP_NF_TARGET_TTL \
-            -e CONFIG_IP6_NF_TARGET_HL \
-            -e CONFIG_ZRAM_DEF_COMP_ZSTD \
-            -e CONFIG_EROFS_FS
-
-          # Compile Kernel explicitly passing Clang, LLVM tools and -Wno-error flags
-          make -j$(nproc --all) O=out \
-            ARCH=arm64 \
-            CC=clang \
-            CLANG_TRIPLE=aarch64-linux-gnu- \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-            AR=llvm-ar \
-            NM=llvm-nm \
-            OBJCOPY=llvm-objcopy \
-            OBJDUMP=llvm-objdump \
-            STRIP=llvm-strip \
-            HOSTCFLAGS="-fcommon" \
-            KCFLAGS="-Wno-error -Wno-unknown-attributes -Wno-error=unknown-attributes -Wno-format"
-
-          echo "Kernel build finished!"
+          echo "Build successful! Checking generated kernel files:"
           ls -lh out/arch/arm64/boot/Image*
+          ls -lh out/arch/arm64/boot/dt.img || true
 
-      - name: Package AnyKernel3 Flashable ZIP
+      - name: Package Artifacts
         run: |
-          git clone https://github.com/osm0sis/AnyKernel3.git anykernel
-          cd anykernel
+          mkdir -p artifact
+          [ -f out/arch/arm64/boot/Image ] && cp out/arch/arm64/boot/Image ./artifact/Image-exynos9810
+          [ -f out/arch/arm64/boot/dt.img ] && cp out/arch/arm64/boot/dt.img ./artifact/dt.img
+          [ -f out/arch/arm64/boot/Image.samsung ] && cp out/arch/arm64/boot/Image.samsung ./artifact/Image.samsung
+          find out/arch/arm64/boot/dts/ -name "*.dtb" -exec cp {} ./artifact/ \; 2>/dev/null || true
 
-          # Configure AnyKernel3 for Galaxy Note 9 (crownlte)
-          sed -i 's/device.name1=.*/device.name1=crownlte/g' anykernel.sh
-          sed -i 's/device.name2=.*/device.name2=star2lte/g' anykernel.sh
-          sed -i 's/device.name3=.*/device.name3=starlte/g' anykernel.sh
-          sed -i 's|block=auto;|block=/dev/block/platform/11120000.ufs/by-name/BOOT;|g' anykernel.sh
-          sed -i 's/is_slot_device=0;/is_slot_device=0;/g' anykernel.sh
+          echo "=== Artifacts to Upload ==="
+          ls -lh ./artifact/
 
-          # Copy compiled Image
-          if [ -f ../out/arch/arm64/boot/Image ]; then
-            cp ../out/arch/arm64/boot/Image .
-          elif [ -f ../out/arch/arm64/boot/Image.gz ]; then
-            cp ../out/arch/arm64/boot/Image.gz Image
-          elif [ -f ../out/arch/arm64/boot/Image.samsung ]; then
-            cp ../out/arch/arm64/boot/Image.samsung Image
-          fi
-
-          # Copy DTB if present
-          find ../out/arch/arm64/boot/ -name "*dt*.img" -o -name "dtb" -o -name "*.dtb" | head -n 1 | xargs -I {} cp {} dtb || true
-
-          # Package into ZIP
-          ZIP_NAME="NullPoint-KernelSU-Next-v2.5-crownlte-$(date +%Y%m%d).zip"
-          zip -r9 "../$ZIP_NAME" * -x .git README.md *placeholder
-          echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
-          cd ..
-
-      - name: Upload Kernel Flashable ZIP to GitHub Artifacts
+      - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.ZIP_NAME }}
-          path: ${{ env.ZIP_NAME }}
+          name: NullPoint-KernelSU-Next-v2.5-crownlte-Official
+          path: artifact/
