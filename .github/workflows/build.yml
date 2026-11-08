@@ -60,14 +60,15 @@ jobs:
           sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.lex.c_shipped || true
 
           # Patch KernelSU-Next throne_tracker for Android 16/17 FBE virtual mounts & pin manager
-          sed -i 's/file->f_inode->i_sb->s_magic != data_app_magic/0/g' drivers/kernelsu/manager/throne_tracker.c || true
-          echo "KSU_MANAGER_PACKAGE := com.rifsxd.ksunext" >> drivers/kernelsu/Kbuild
+          sed -i 's/file->f_inode->i_sb->s_magic != data_app_magic/0/g' KernelSU-Next/kernel/manager/throne_tracker.c || true
+          echo "KSU_MANAGER_PACKAGE := com.rifsxd.ksunext" >> KernelSU-Next/kernel/Kbuild || true
 
           # Align KernelSU-Next driver UAPI with official release v3.4.2 manager (UAPI 5)
-          find drivers/kernelsu -name "supercall.h" -exec sed -i 's/KERNEL_SU_UAPI_VERSION = [0-9]*/KERNEL_SU_UAPI_VERSION = 5/g' {} + || true
+          find KernelSU-Next -name "supercall.h" -exec sed -i 's/#define KERNEL_SU_UAPI_VERSION .*/#define KERNEL_SU_UAPI_VERSION 5/' {} + || true
 
           # Auto-crown com.rifsxd.ksunext natively from early boot
-          find drivers/kernelsu -name "apk_sign.c" -exec sed -i 's/bool is_manager_apk(char \*path)/bool is_manager_apk(char \*path) { if (strstr(path, "com.rifsxd.ksunext")) return true;/g' {} + || true
+          find KernelSU-Next -name "apk_sign.c" -exec sed -i '1s@^@#include <linux/string.h>\n@' {} + || true
+          find KernelSU-Next -name "apk_sign.c" -exec sed -i 's/bool is_manager_apk(char \*path)/bool is_manager_apk(char \*path) { if (path \&\& strstr(path, "com.rifsxd.ksunext")) return true;/' {} + || true
 
           export PATH=$(pwd)/toolchain/clang/clang-r365631c/bin:$(pwd)/toolchain/gcc64/bin:$(pwd)/toolchain/gcc32/bin:$PATH
           export ARCH=arm64
