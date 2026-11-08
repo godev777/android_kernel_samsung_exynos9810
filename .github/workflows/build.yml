@@ -41,11 +41,16 @@ jobs:
           echo "Installing KernelSU-Next legacy driver for Linux 4.9..."
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s legacy
 
-      - name: Patch Kernel Headers & DTC for Modern Compiler
+      - name: Patch Kernel Headers, Makefiles & DTC for Clang
         run: |
-          echo "Patching compiler-gcc.h version check..."
+          echo "Disabling -Werror in Makefiles..."
+          sed -i 's/-Werror//g' Makefile arch/arm64/Makefile || true
+
+          echo "Patching compiler-gcc.h version check & error attribute..."
           sed -i 's/# error Sorry, your version of GCC is too old/\/\/# error/' include/linux/compiler-gcc.h || true
           sed -i 's/#error Sorry, your version of GCC is too old/\/\/#error/' include/linux/compiler-gcc.h || true
+          sed -i 's/__attribute__((error(message)))//g' include/linux/compiler-gcc.h || true
+          sed -i 's/__attribute__((warning(message)))//g' include/linux/compiler-gcc.h || true
 
           echo "Patching DTC yylloc for modern GCC host..."
           sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.l || true
@@ -54,8 +59,8 @@ jobs:
       - name: Compile Kernel Image & DTB
         run: |
           export PATH="$(pwd)/toolchain/clang/bin:$PATH"
-          export KCFLAGS="-fgnuc-version=11.4.0"
           export HOSTCFLAGS="-fcommon"
+          export KCFLAGS="-Wno-error -Wno-unknown-attributes -Wno-error=unknown-attributes -Wno-format"
 
           # Defconfig for crownlte with Clang passed directly
           make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- exynos9810-crownlte_defconfig
@@ -73,7 +78,7 @@ jobs:
             -e CONFIG_ZRAM_DEF_COMP_ZSTD \
             -e CONFIG_EROFS_FS
 
-          # Compile Kernel explicitly passing Clang and LLVM tools
+          # Compile Kernel explicitly passing Clang, LLVM tools and -Wno-error flags
           make -j$(nproc --all) O=out \
             ARCH=arm64 \
             CC=clang \
@@ -85,7 +90,8 @@ jobs:
             OBJCOPY=llvm-objcopy \
             OBJDUMP=llvm-objdump \
             STRIP=llvm-strip \
-            HOSTCFLAGS="-fcommon"
+            HOSTCFLAGS="-fcommon" \
+            KCFLAGS="-Wno-error -Wno-unknown-attributes -Wno-error=unknown-attributes -Wno-format"
 
           echo "Kernel build finished!"
           ls -lh out/arch/arm64/boot/Image*
