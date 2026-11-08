@@ -19,21 +19,19 @@ jobs:
           submodules: recursive
           fetch-depth: 1
 
-      - name: Install Build Dependencies
+      - name: Install Build Dependencies & Toolchains
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential bc bison flex libssl-dev libelf-dev \
-            git curl wget zip python3 python-is-python3 cpio lz4 zstd tar libarchive-tools
+            git curl wget zip python3 python-is-python3 cpio lz4 zstd tar libarchive-tools \
+            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi
 
-      - name: Download Toolchains (Proton Clang & GCC)
+      - name: Download Proton Clang Toolchain
         run: |
           mkdir -p toolchain
           cd toolchain
           echo "Cloning Proton Clang from GitHub..."
           git clone --depth=1 https://github.com/kdrag0n/proton-clang.git clang
-          echo "Cloning GCC AArch64 & ARM32 from GitHub..."
-          git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git gcc64
-          git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9.git gcc32
           cd ..
 
       - name: Setup KernelSU-Next Legacy Driver
@@ -43,18 +41,24 @@ jobs:
           echo "Installing KernelSU-Next legacy driver for Linux 4.9..."
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s legacy
 
+      - name: Patch Kernel Headers & DTC for Modern Compiler
+        run: |
+          echo "Patching compiler-gcc.h version check..."
+          sed -i 's/# error Sorry, your version of GCC is too old/\/\/# error/' include/linux/compiler-gcc.h || true
+          sed -i 's/#error Sorry, your version of GCC is too old/\/\/#error/' include/linux/compiler-gcc.h || true
+
+          echo "Patching DTC yylloc for modern GCC host..."
+          sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.l || true
+          sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.lex.c_shipped || true
+
       - name: Compile Kernel Image & DTB
         run: |
-          export PATH="$(pwd)/toolchain/clang/bin:$(pwd)/toolchain/gcc64/bin:$(pwd)/toolchain/gcc32/bin:$PATH"
-          export ARCH=arm64
-          export SUBARCH=arm64
-          export CC=clang
-          export CLANG_TRIPLE=aarch64-linux-gnu-
-          export CROSS_COMPILE=aarch64-linux-android-
-          export CROSS_COMPILE_ARM32=arm-linux-androideabi-
+          export PATH="$(pwd)/toolchain/clang/bin:$PATH"
+          export KCFLAGS="-fgnuc-version=11.4.0"
+          export HOSTCFLAGS="-fcommon"
 
-          # Defconfig for crownlte
-          make O=out exynos9810-crownlte_defconfig
+          # Defconfig for crownlte with Clang passed directly
+          make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- exynos9810-crownlte_defconfig
 
           # Ensure KernelSU, SuSFS, BBR, and optimization configs are enabled
           ./scripts/config --file out/.config \
@@ -69,8 +73,19 @@ jobs:
             -e CONFIG_ZRAM_DEF_COMP_ZSTD \
             -e CONFIG_EROFS_FS
 
-          # Compile Kernel
-          make -j$(nproc --all) O=out
+          # Compile Kernel explicitly passing Clang and LLVM tools
+          make -j$(nproc --all) O=out \
+            ARCH=arm64 \
+            CC=clang \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            AR=llvm-ar \
+            NM=llvm-nm \
+            OBJCOPY=llvm-objcopy \
+            OBJDUMP=llvm-objdump \
+            STRIP=llvm-strip \
+            HOSTCFLAGS="-fcommon"
 
           echo "Kernel build finished!"
           ls -lh out/arch/arm64/boot/Image*
