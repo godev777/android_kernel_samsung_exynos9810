@@ -24,7 +24,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential bc bison flex libssl-dev libelf-dev \
             git curl wget zip python3 python-is-python3 cpio lz4 zstd tar libarchive-tools \
-            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi
+            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi \
+            dwarves
 
       - name: Download Proton Clang Toolchain
         run: |
@@ -43,9 +44,10 @@ jobs:
 
       - name: Patch Defconfig, Headers & Neutralize Stack Protector
         run: |
-          echo "Disabling stack protector in all defconfigs..."
+          echo "Disabling stack protector and BTF in all defconfigs..."
           sed -i 's/CONFIG_CC_STACKPROTECTOR_STRONG=y/CONFIG_CC_STACKPROTECTOR_NONE=y/g' arch/arm64/configs/*defconfig || true
           sed -i 's/CONFIG_CC_STACKPROTECTOR_REGULAR=y/CONFIG_CC_STACKPROTECTOR_NONE=y/g' arch/arm64/configs/*defconfig || true
+          sed -i 's/CONFIG_DEBUG_INFO_BTF=y/# CONFIG_DEBUG_INFO_BTF is not set/g' arch/arm64/configs/*defconfig || true
 
           echo "Disabling standalone -Werror and prepare-compiler-check in Makefile..."
           sed -i 's/[[:space:]]-Werror[[:space:]]/ /g' Makefile arch/arm64/Makefile || true
@@ -73,11 +75,12 @@ jobs:
           # Defconfig for crownlte with Clang passed directly
           make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- exynos9810-crownlte_defconfig
 
-          # Ensure Stack Protector is NONE and KernelSU, SuSFS, BBR, and optimization configs are enabled
+          # Ensure Stack Protector & BTF is disabled and KernelSU, SuSFS, BBR, and optimization configs are enabled
           ./scripts/config --file out/.config \
             -d CONFIG_CC_STACKPROTECTOR_STRONG \
             -d CONFIG_CC_STACKPROTECTOR_REGULAR \
             -e CONFIG_CC_STACKPROTECTOR_NONE \
+            -d CONFIG_DEBUG_INFO_BTF \
             -e CONFIG_KSU \
             -e CONFIG_KSU_SUSFS \
             -e CONFIG_TCP_CONG_BBR \
@@ -120,7 +123,16 @@ jobs:
           sed -i 's/is_slot_device=0;/is_slot_device=0;/g' anykernel.sh
 
           # Copy compiled Image
-          cp ../out/arch/arm64/boot/Image .
+          if [ -f ../out/arch/arm64/boot/Image ]; then
+            cp ../out/arch/arm64/boot/Image .
+          elif [ -f ../out/arch/arm64/boot/Image.gz ]; then
+            cp ../out/arch/arm64/boot/Image.gz Image
+          elif [ -f ../out/arch/arm64/boot/Image.samsung ]; then
+            cp ../out/arch/arm64/boot/Image.samsung Image
+          fi
+
+          # Copy DTB if present
+          find ../out/arch/arm64/boot/ -name "*dt*.img" -o -name "dtb" -o -name "*.dtb" | head -n 1 | xargs -I {} cp {} dtb || true
 
           # Package into ZIP
           ZIP_NAME="NullPoint-KernelSU-Next-v2.5-crownlte-$(date +%Y%m%d).zip"
