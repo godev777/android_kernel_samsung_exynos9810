@@ -1,101 +1,103 @@
-name: Build NullPoint Kernel
+name: Build NullPoint Kernel (KernelSU-Next + SuSFS 2.3.0)
 
 on:
   workflow_dispatch:
-    inputs:
-      device:
-        description: 'Pilih Target Device'
-        required: true
-        default: 'crownlte'
-        type: choice
-        options:
-          - crownlte
-          - star2lte
-          - starlte
+  push:
+    branches:
+      - lineage-24.0-xxksu3-susfs2
+      - main
 
 jobs:
   build:
-    name: Compile NullPoint Kernel
+    name: Compile Exynos 9810 Crownlte Kernel
     runs-on: ubuntu-22.04
+
     steps:
       - name: Checkout Kernel Source
         uses: actions/checkout@v4
         with:
-          ref: lineage-24.0-xxksu3-susfs2
           submodules: recursive
           fetch-depth: 1
 
-      - name: Setup Build Environment
+      - name: Install Build Dependencies
         run: |
-          sudo add-apt-repository universe -y || true
           sudo apt-get update
-          sudo apt-get install -y bc bison build-essential ccache curl flex \
-            git libssl-dev libelf-dev libncurses5-dev python3 libtinfo5 \
-            cpio lz4 zstd dwarves || sudo apt-get install -y bc bison \
-            build-essential ccache curl flex git libssl-dev libelf-dev \
-            libncurses-dev python3 cpio lz4 zstd
+          sudo apt-get install -y build-essential bc bison flex libssl-dev libelf-dev \
+            git curl wget zip python3 python-is-python3 cpio lz4 zstd tar libarchive-tools
 
-      - name: Download Clang & GCC Toolchain
+      - name: Download AOSP Clang & GCC Toolchains
         run: |
           mkdir -p toolchain
           cd toolchain
-          git clone --depth=1 https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 -b android11-release clang
-          git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 -b android11-release gcc64
-          git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 -b android11-release gcc32
+          echo "Cloning AOSP Clang r383902b..."
+          git clone --depth=1 https://gitlab.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r383902b.git clang
+          echo "Cloning GCC AArch64 & ARM32..."
+          git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git gcc64
+          git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9.git gcc32
+          cd ..
 
-      - name: Configure & Build NullPoint Kernel
+      - name: Setup KernelSU-Next Legacy Driver
         run: |
-          export PATH=$(pwd)/toolchain/clang/clang-r365631c/bin:$(pwd)/toolchain/gcc64/bin:$(pwd)/toolchain/gcc32/bin:$PATH
+          echo "Removing legacy KernelSU..."
+          rm -rf KernelSU drivers/kernelsu
+          echo "Installing KernelSU-Next legacy driver for Linux 4.9..."
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s legacy
 
-          # Patch Clang warnings & compatibility
-          echo "CFLAGS_susfs.o += -Wno-error -Wno-missing-braces" >> fs/Makefile
-          sed -i 's/ = {0};/ = {{0}};/g' fs/susfs.c || true
-          sed -i 's/#define ZSTD_FALLTHROUGH .*/#define ZSTD_FALLTHROUGH do {} while (0)/' lib/zstd/common/compiler.h || true
-
+      - name: Compile Kernel Image & DTB
+        run: |
+          export PATH="$(pwd)/toolchain/clang/bin:$(pwd)/toolchain/gcc64/bin:$(pwd)/toolchain/gcc32/bin:$PATH"
           export ARCH=arm64
           export SUBARCH=arm64
+          export CC=clang
+          export CLANG_TRIPLE=aarch64-linux-gnu-
           export CROSS_COMPILE=aarch64-linux-android-
           export CROSS_COMPILE_ARM32=arm-linux-androideabi-
-          export CLANG_TRIPLE=aarch64-linux-gnu-
-          export CC=clang
-          export KCFLAGS="-Wno-error -Wno-missing-braces"
 
-          DEVICE="${{ github.event.inputs.device }}"
-          echo "Compiling for: $DEVICE"
+          # Defconfig for crownlte
+          make O=out exynos9810-crownlte_defconfig
 
-          # 1. Generate base defconfig
-          make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-android- CROSS_COMPILE_ARM32=arm-linux-androideabi- exynos9810-${DEVICE}_defconfig
+          # Ensure KernelSU, SuSFS, BBR, and optimization configs are enabled
+          ./scripts/config --file out/.config \
+            -e CONFIG_KSU \
+            -e CONFIG_KSU_SUSFS \
+            -e CONFIG_TCP_CONG_BBR \
+            -d CONFIG_DEFAULT_BIC \
+            -e CONFIG_DEFAULT_BBR \
+            -e CONFIG_NETFILTER_XT_TARGET_HL \
+            -e CONFIG_IP_NF_TARGET_TTL \
+            -e CONFIG_IP6_NF_TARGET_HL \
+            -e CONFIG_ZRAM_DEF_COMP_ZSTD \
+            -e CONFIG_EROFS_FS
 
-          # 2. Inject NullPoint Branding & Features
-          ./scripts/config --file out/.config --set-str LOCALVERSION "-NullPoint-v1.0-godev777"
-          ./scripts/config --file out/.config --enable TCP_CONG_BBR
-          ./scripts/config --file out/.config --set-str DEFAULT_TCP_CONG "bbr"
-          ./scripts/config --file out/.config --enable NETFILTER_XT_TARGET_HL
-          ./scripts/config --file out/.config --enable IP_NF_TARGET_TTL
-          ./scripts/config --file out/.config --enable IP6_NF_TARGET_HL
-          ./scripts/config --file out/.config --enable CRYPTO_ZSTD
-          ./scripts/config --file out/.config --enable ZRAM_DEF_COMP_ZSTD
+          # Compile Kernel
+          make -j$(nproc --all) O=out
 
-          # 3. Regenerate final config
-          make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-android- CROSS_COMPILE_ARM32=arm-linux-androideabi- olddefconfig
+          echo "Kernel build finished!"
+          ls -lh out/arch/arm64/boot/Image*
 
-          # 4. Compile Kernel Image
-          make -j$(nproc --all) O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-android- CROSS_COMPILE_ARM32=arm-linux-androideabi- KCFLAGS="-Wno-error -Wno-missing-braces" Image.samsung
-
-      - name: Package Artifacts
+      - name: Package AnyKernel3 Flashable ZIP
         run: |
-          mkdir -p artifact
-          DEVICE="${{ github.event.inputs.device }}"
-          [ -f out/arch/arm64/boot/Image ] && cp out/arch/arm64/boot/Image ./artifact/Image-exynos9810
-          [ -f out/arch/arm64/boot/dt.img ] && cp out/arch/arm64/boot/dt.img ./artifact/dt.img
-          [ -f out/arch/arm64/boot/Image.samsung ] && cp out/arch/arm64/boot/Image.samsung ./artifact/Image.samsung
-          find out/arch/arm64/boot/dts/ -name "*.dtb" -exec cp {} ./artifact/ \; 2>/dev/null || true
-          
-          echo "=== Output Artifacts for $DEVICE ==="
-          ls -lh ./artifact/
+          git clone https://github.com/osm0sis/AnyKernel3.git anykernel
+          cd anykernel
 
-      - name: Upload Kernel Artifact
+          # Configure AnyKernel3 for Galaxy Note 9 (crownlte)
+          sed -i 's/device.name1=.*/device.name1=crownlte/g' anykernel.sh
+          sed -i 's/device.name2=.*/device.name2=star2lte/g' anykernel.sh
+          sed -i 's/device.name3=.*/device.name3=starlte/g' anykernel.sh
+          sed -i 's|block=auto;|block=/dev/block/platform/11120000.ufs/by-name/BOOT;|g' anykernel.sh
+          sed -i 's/is_slot_device=0;/is_slot_device=0;/g' anykernel.sh
+
+          # Copy compiled Image
+          cp ../out/arch/arm64/boot/Image .
+
+          # Package into ZIP
+          ZIP_NAME="NullPoint-KernelSU-Next-v2.5-crownlte-$(date +%Y%m%d).zip"
+          zip -r9 "../$ZIP_NAME" * -x .git README.md *placeholder
+          echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
+          cd ..
+
+      - name: Upload Kernel Flashable ZIP to GitHub Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: NullPoint-Kernel-${{ github.event.inputs.device }}-v1.0
-          path: artifact/
+          name: ${{ env.ZIP_NAME }}
+          path: ${{ env.ZIP_NAME }}
