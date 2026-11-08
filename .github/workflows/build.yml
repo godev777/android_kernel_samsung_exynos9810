@@ -47,8 +47,9 @@ jobs:
           sed -i 's/CONFIG_CC_STACKPROTECTOR_STRONG=y/CONFIG_CC_STACKPROTECTOR_NONE=y/g' arch/arm64/configs/*defconfig || true
           sed -i 's/CONFIG_CC_STACKPROTECTOR_REGULAR=y/CONFIG_CC_STACKPROTECTOR_NONE=y/g' arch/arm64/configs/*defconfig || true
 
-          echo "Disabling -Werror and prepare-compiler-check in Makefile..."
-          sed -i 's/-Werror//g' Makefile arch/arm64/Makefile || true
+          echo "Disabling standalone -Werror and prepare-compiler-check in Makefile..."
+          sed -i 's/[[:space:]]-Werror[[:space:]]/ /g' Makefile arch/arm64/Makefile || true
+          sed -i 's/[[:space:]]-Werror$/ /g' Makefile arch/arm64/Makefile || true
           sed -i 's/prepare: prepare-compiler-check/prepare:/g' Makefile || true
           sed -i 's/prepare-compiler-check//g' Makefile || true
           sed -i 's/Cannot use CONFIG_CC_STACKPROTECTOR_STRONG.*/# bypassed/g' Makefile || true
