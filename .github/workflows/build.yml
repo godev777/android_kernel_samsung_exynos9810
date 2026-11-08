@@ -1,132 +1,128 @@
 name: Build NullPoint Kernel (KernelSU-Next + SuSFS 2.3.0)
 
-    on:
-      workflow_dispatch:
-      push:
-        branches:
-          - lineage-24.0-xxksu3-susfs2
-          - main
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - lineage-24.0-xxksu3-susfs2
+      - main
 
-    jobs:
-      build:
-        name: Compile Exynos 9810 Crownlte Kernel
-        runs-on: ubuntu-22.04
+jobs:
+  build:
+    name: Compile Exynos 9810 Crownlte Kernel
+    runs-on: ubuntu-22.04
 
-        steps:
-          - name: Checkout Kernel Source
-            uses: actions/checkout@v4
-            with:
-              submodules: recursive
-              fetch-depth: 1
+    steps:
+      - name: Checkout Kernel Source
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
 
-          - name: Install Build Dependencies
-            run: |
-              sudo add-apt-repository universe -y || true
-              sudo apt-get update
-              sudo apt-get install -y bc bison build-essential ccache curl flex \
-                git libssl-dev libelf-dev libncurses5-dev python3 libtinfo5 \
-                cpio lz4 zstd dwarves || sudo apt-get install -y bc bison \
-                build-essential ccache curl flex git libssl-dev libelf-dev \
-                libncurses-dev python3 cpio lz4 zstd
+      - name: Install Build Dependencies
+        run: |
+          sudo add-apt-repository universe -y || true
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential ccache curl flex \
+            git libssl-dev libelf-dev libncurses5-dev python3 libtinfo5 \
+            cpio lz4 zstd dwarves || sudo apt-get install -y bc bison \
+            build-essential ccache curl flex git libssl-dev libelf-dev \
+            libncurses-dev python3 cpio lz4 zstd
 
-          - name: Download Official Google AOSP Clang & GCC Toolchains
-            run: |
-              mkdir -p toolchain
-              cd toolchain
-              echo "Cloning official Google Android 11 Clang..."
-              git clone --depth=1 https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 -b android11-release clang
-              echo "Cloning official Google GCC AArch64..."
-              git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 -b android11-release gcc64
-              echo "Cloning official Google GCC ARM32..."
-              git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 -b android11-release gcc32
-              cd ..
+      - name: Download Official Google AOSP Clang & GCC Toolchains
+        run: |
+          mkdir -p toolchain
+          cd toolchain
+          echo "Cloning official Google Android 11 Clang..."
+          git clone --depth=1 https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 -b android11-release clang
+          echo "Cloning official Google GCC AArch64..."
+          git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 -b android11-release gcc64
+          echo "Cloning official Google GCC ARM32..."
+          git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 -b android11-release gcc32
+          cd ..
 
-          - name: Setup KernelSU-Next Legacy Driver
-            run: |
-              echo "Removing old KernelSU..."
-              rm -rf KernelSU drivers/kernelsu
-              echo "Installing KernelSU-Next legacy driver for Linux 4.9..."
-              curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s legacy
+      - name: Setup KernelSU-Next Legacy Driver
+        run: |
+          echo "Removing old KernelSU..."
+          rm -rf KernelSU drivers/kernelsu
+          echo "Installing KernelSU-Next legacy driver for Linux 4.9..."
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s legacy
 
-          - name: Configure & Patch Kernel
-            run: |
-              # Patch Clang warnings & compatibility
-              echo "CFLAGS_susfs.o += -Wno-error -Wno-missing-braces" >> fs/Makefile
-              sed -i 's/ = {0};/ = {{0}};/g' fs/susfs.c || true
-              sed -i 's/#define ZSTD_FALLTHROUGH .*/#define ZSTD_FALLTHROUGH do {} while (0)/' lib/zstd/common/compiler.h || true
+      - name: Configure & Patch Kernel
+        run: |
+          # Patch Clang warnings & compatibility
+          echo "CFLAGS_susfs.o += -Wno-error -Wno-missing-braces" >> fs/Makefile
+          sed -i 's/ = {0};/ = {{0}};/g' fs/susfs.c || true
+          sed -i 's/#define ZSTD_FALLTHROUGH .*/#define ZSTD_FALLTHROUGH do {} while (0)/' lib/zstd/common/compiler.h || true
 
-              # Patch DTC yylloc for modern host GCC
-              sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.l || true
-              sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.lex.c_shipped || true
+          # Patch DTC yylloc for modern host GCC
+          sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.l || true
+          sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.lex.c_shipped || true
 
-              # Patch KernelSU-Next: UAPI 5, Auto-Crown com.rifsxd.ksunext, FBE bypass
-              sed -i 's/#define KERNEL_SU_UAPI_VERSION 6/#define KERNEL_SU_UAPI_VERSION 5/' KernelSU-Next/uapi/supercall.h || true
-              sed -i 's/return check_v2_signature/if (path \&\& strstr(path, "com.rifsxd.ksunext")) return true; return check_v2_signature/'
-              KernelSU-Next/kernel/manager/apk_sign.c || true
-              sed -i 's/file->f_inode->i_sb->s_magic != data_app_magic/0/' KernelSU-Next/kernel/manager/throne_tracker.c || true
+          # Patch KernelSU-Next: UAPI 5, Auto-Crown com.rifsxd.ksunext, FBE bypass
+          sed -i 's/#define KERNEL_SU_UAPI_VERSION 6/#define KERNEL_SU_UAPI_VERSION 5/' KernelSU-Next/uapi/supercall.h || true
+          sed -i 's/return check_v2_signature/if (path \&\& strstr(path, "com.rifsxd.ksunext")) return true; return check_v2_signature/' KernelSU-Next/kernel/manager/apk_sign.c || true
+          sed -i 's/file->f_inode->i_sb->s_magic != data_app_magic/0/' KernelSU-Next/kernel/manager/throne_tracker.c || true
 
-              export PATH=$(pwd)/toolchain/clang/clang-r365631c/bin:$(pwd)/toolchain/gcc64/bin:$(pwd)/toolchain/gcc32/bin:$PATH
-              export ARCH=arm64
-              export SUBARCH=arm64
-              export CROSS_COMPILE=aarch64-linux-android-
-              export CROSS_COMPILE_ARM32=arm-linux-androideabi-
-              export CLANG_TRIPLE=aarch64-linux-gnu-
-              export CC=clang
-              export KCFLAGS="-Wno-error -Wno-missing-braces"
+          export PATH=$(pwd)/toolchain/clang/clang-r365631c/bin:$(pwd)/toolchain/gcc64/bin:$(pwd)/toolchain/gcc32/bin:$PATH
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-android-
+          export CROSS_COMPILE_ARM32=arm-linux-androideabi-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          export CC=clang
+          export KCFLAGS="-Wno-error -Wno-missing-braces"
 
-              # 1. Defconfig for crownlte
-              make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-android- CROSS_COMPILE_ARM32=arm-linux-androideabi-
-              exynos9810-crownlte_defconfig
+          # 1. Defconfig for crownlte
+          make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-android- CROSS_COMPILE_ARM32=arm-linux-androideabi- exynos9810-crownlte_defconfig
 
-              # 2. Inject NullPoint v2.5 Branding & Features
-              ./scripts/config --file out/.config --set-str LOCALVERSION "-NullPoint-v2.5-KSU-Next-godev777"
-              ./scripts/config --file out/.config --enable KSU
-              ./scripts/config --file out/.config --enable KSU_SUSFS
-              ./scripts/config --file out/.config --enable KSU_DEBUG
-              ./scripts/config --file out/.config --enable TCP_CONG_BBR
-              ./scripts/config --file out/.config --set-str DEFAULT_TCP_CONG "bbr"
-              ./scripts/config --file out/.config --enable NETFILTER_XT_TARGET_HL
-              ./scripts/config --file out/.config --enable IP_NF_TARGET_TTL
-              ./scripts/config --file out/.config --enable IP6_NF_TARGET_HL
-              ./scripts/config --file out/.config --enable CRYPTO_ZSTD
-              ./scripts/config --file out/.config --enable ZRAM_DEF_COMP_ZSTD
-              ./scripts/config --file out/.config --enable EROFS_FS
+          # 2. Inject NullPoint v2.5 Branding & Features
+          ./scripts/config --file out/.config --set-str LOCALVERSION "-NullPoint-v2.5-KSU-Next-godev777"
+          ./scripts/config --file out/.config --enable KSU
+          ./scripts/config --file out/.config --enable KSU_SUSFS
+          ./scripts/config --file out/.config --enable KSU_DEBUG
+          ./scripts/config --file out/.config --enable TCP_CONG_BBR
+          ./scripts/config --file out/.config --set-str DEFAULT_TCP_CONG "bbr"
+          ./scripts/config --file out/.config --enable NETFILTER_XT_TARGET_HL
+          ./scripts/config --file out/.config --enable IP_NF_TARGET_TTL
+          ./scripts/config --file out/.config --enable IP6_NF_TARGET_HL
+          ./scripts/config --file out/.config --enable CRYPTO_ZSTD
+          ./scripts/config --file out/.config --enable ZRAM_DEF_COMP_ZSTD
+          ./scripts/config --file out/.config --enable EROFS_FS
 
-              # 3. Finalize config
-              make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-android- CROSS_COMPILE_ARM32=arm-linux-androideabi-
-              olddefconfig
+          # 3. Finalize config
+          make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-android- CROSS_COMPILE_ARM32=arm-linux-androideabi- olddefconfig
 
-          - name: Compile Kernel Image & DT.img
-            run: |
-              export PATH=$(pwd)/toolchain/clang/clang-r365631c/bin:$(pwd)/toolchain/gcc64/bin:$(pwd)/toolchain/gcc32/bin:$PATH
-              export ARCH=arm64
-              export SUBARCH=arm64
-              export CROSS_COMPILE=aarch64-linux-android-
-              export CROSS_COMPILE_ARM32=arm-linux-androideabi-
-              export CLANG_TRIPLE=aarch64-linux-gnu-
-              export CC=clang
+      - name: Compile Kernel Image & DT.img
+        run: |
+          export PATH=$(pwd)/toolchain/clang/clang-r365631c/bin:$(pwd)/toolchain/gcc64/bin:$(pwd)/toolchain/gcc32/bin:$PATH
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-android-
+          export CROSS_COMPILE_ARM32=arm-linux-androideabi-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          export CC=clang
 
-              echo "Compiling Image.samsung..."
-              make -j$(nproc --all) O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-android-
-              CROSS_COMPILE_ARM32=arm-linux-androideabi- KCFLAGS="-Wno-error -Wno-missing-braces" Image.samsung
+          echo "Compiling Image.samsung..."
+          make -j$(nproc --all) O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-android- CROSS_COMPILE_ARM32=arm-linux-androideabi- KCFLAGS="-Wno-error -Wno-missing-braces" Image.samsung
 
-              echo "Build successful! Checking generated kernel files:"
-              ls -lh out/arch/arm64/boot/Image*
-              ls -lh out/arch/arm64/boot/dt.img || true
+          echo "Build successful! Checking generated kernel files:"
+          ls -lh out/arch/arm64/boot/Image*
+          ls -lh out/arch/arm64/boot/dt.img || true
 
-          - name: Package Artifacts
-            run: |
-              mkdir -p artifact
-              [ -f out/arch/arm64/boot/Image ] && cp out/arch/arm64/boot/Image ./artifact/Image-exynos9810
-              [ -f out/arch/arm64/boot/dt.img ] && cp out/arch/arm64/boot/dt.img ./artifact/dt.img
-              [ -f out/arch/arm64/boot/Image.samsung ] && cp out/arch/arm64/boot/Image.samsung ./artifact/Image.samsung
-              find out/arch/arm64/boot/dts/ -name "*.dtb" -exec cp {} ./artifact/ \; 2>/dev/null || true
+      - name: Package Artifacts
+        run: |
+          mkdir -p artifact
+          [ -f out/arch/arm64/boot/Image ] && cp out/arch/arm64/boot/Image ./artifact/Image-exynos9810
+          [ -f out/arch/arm64/boot/dt.img ] && cp out/arch/arm64/boot/dt.img ./artifact/dt.img
+          [ -f out/arch/arm64/boot/Image.samsung ] && cp out/arch/arm64/boot/Image.samsung ./artifact/Image.samsung
+          find out/arch/arm64/boot/dts/ -name "*.dtb" -exec cp {} ./artifact/ \; 2>/dev/null || true
 
-              echo "=== Artifacts to Upload ==="
-              ls -lh ./artifact/
+          echo "=== Artifacts to Upload ==="
+          ls -lh ./artifact/
 
-          - name: Upload Kernel Artifact
-            uses: actions/upload-artifact@v4
-            with:
-              name: NullPoint-KernelSU-Next-v2.5-crownlte-Official
-              path: artifact/
+      - name: Upload Kernel Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NullPoint-KernelSU-Next-v2.5-crownlte-Official
+          path: artifact/
