@@ -61,7 +61,7 @@ jobs:
 
           # Patch KernelSU-Next throne_tracker for Android 16/17 FBE virtual mounts & pin manager
           sed -i 's/file->f_inode->i_sb->s_magic != data_app_magic/0/g' drivers/kernelsu/manager/throne_tracker.c || true
-          sed -i 's/ifndef KSU_MANAGER_PACKAGE/KSU_MANAGER_PACKAGE := com.rifsxd.ksunext\nifndef KSU_MANAGER_PACKAGE/g' drivers/kernelsu/Kbuild || true
+          echo "KSU_MANAGER_PACKAGE := com.rifsxd.ksunext" >> drivers/kernelsu/Kbuild
 
           export PATH=$(pwd)/toolchain/clang/clang-r365631c/bin:$(pwd)/toolchain/gcc64/bin:$(pwd)/toolchain/gcc32/bin:$PATH
           export ARCH=arm64
@@ -78,7 +78,8 @@ jobs:
           # 2. Inject NullPoint v2.5 Branding & Features
           ./scripts/config --file out/.config --set-str LOCALVERSION "-NullPoint-v2.5-KSU-Next-godev777"
           ./scripts/config --file out/.config --enable KSU
-          ./scripts/config --file out/.config --enable KSU_SUSFS\n          ./scripts/config --file out/.config --enable KSU_DEBUG
+          ./scripts/config --file out/.config --enable KSU_SUSFS
+          ./scripts/config --file out/.config --enable KSU_DEBUG
           ./scripts/config --file out/.config --enable TCP_CONG_BBR
           ./scripts/config --file out/.config --set-str DEFAULT_TCP_CONG "bbr"
           ./scripts/config --file out/.config --enable NETFILTER_XT_TARGET_HL
